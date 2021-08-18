@@ -1,5 +1,74 @@
 package main
 
+import (
+	"fmt"
+	"log"
+	"net/http"
+
+	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
+)
+
 func main() {
-	print("hello world")
+	http.Handle("/", http.FileServer(http.Dir("static")))
+	http.HandleFunc("/ws", socketHandler)
+
+	port := "8080"
+	log.Printf("Listening on port %s", port)
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
+		log.Fatal(err)
+	}
+}
+
+var upgrader = websocket.Upgrader{
+	ReadBufferSize:  1024,
+	WriteBufferSize: 1024,
+}
+
+func socketHandler(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Printf("upgrader.Upgrade: %v", err)
+		return
+	}
+
+	defer conn.Close()
+
+	uuid.NewString()
+
+	for {
+		messageType, p, err := conn.ReadMessage()
+		fmt.Println(string(p))
+
+		if err != nil {
+			log.Printf("conn.ReadMessage: %v", err)
+			return
+		}
+		if err := conn.WriteMessage(messageType, p); err != nil {
+			log.Printf("conn.WriteMessage: %v", err)
+			return
+		}
+	}
+}
+
+type Server struct {
+	clientMap map[string]Client
+}
+
+type Client struct {
+	sid  string
+	conn *websocket.Conn
+}
+
+type Player struct {
+	pos []int
+	hp  []int
+}
+
+type Result struct {
+	data string
+}
+
+func (c *Client) Send(msg string) {
+	c.conn.WriteJSON(Result{data: "test"})
 }
