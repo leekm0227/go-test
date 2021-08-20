@@ -6,14 +6,16 @@ import (
 	"math/rand"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
 var channel Channel = Channel{
-	clients: make(map[string]*Client),
-	players: make(map[string]*Player),
+	conns:   sync.Map{},
+	players: sync.Map{},
 }
 
 const MAX_SIZE = 100
@@ -48,19 +50,30 @@ var upgrader = websocket.Upgrader{
 }
 
 func socketHandler(w http.ResponseWriter, r *http.Request) {
+	sid := strings.Split(uuid.NewString(), "-")[0]
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("upgrader.Upgrade: %+v", err)
 		return
 	}
-	defer conn.Close()
+
+	defer func() {
+		channel.players.Delete(sid)
+		channel.Broadcast(Response{
+			PayloadType: "DEAD",
+			SessionId:   sid,
+			RegTime:     uint64(time.Now().Unix()),
+		})
+		conn.Close()
+	}()
 
 	// regist client
 	client := Client{
-		Sid:  strings.Split(uuid.NewString(), "-")[0],
+		Sid:  sid,
 		Conn: conn,
+		mu:   &sync.Mutex{},
 	}
-	channel.clients[client.Sid] = &client
+	channel.conns.Store(client.Sid, client)
 
 	for {
 		var req Request
@@ -70,107 +83,120 @@ func socketHandler(w http.ResponseWriter, r *http.Request) {
 		}
 
 		req.Sid = client.Sid
-		eventHandler(req)
+		eventHandler(client, req)
 	}
 }
 
-func eventHandler(req Request) {
-	var client = channel.clients[req.Sid]
-	if client == nil {
-		return
-	}
-
+func eventHandler(client Client, req Request) {
 	switch req.PayloadType {
 	case INIT:
-		Player := Player{
+		player := Player{
 			Id:  client.Sid,
 			Pos: [2]int{rand.Intn(MAX_SIZE), rand.Intn(MAX_SIZE)},
 			Hp:  [2]int{10, 0},
 		}
-		channel.players[client.Sid] = &Player
+
+		channel.players.Store(client.Sid, player)
+		players := make(map[string]*Player)
+		channel.players.Range(func(key interface{}, value interface{}) bool {
+			v, ok := channel.players.Load(key)
+			if !ok {
+				return false
+			}
+
+			player := v.(Player)
+			players[key.(string)] = &player
+			return true
+		})
 
 		client.Conn.WriteJSON(Response{
 			PayloadType: "INIT",
 			Id:          client.Sid,
-			Players:     channel.players,
+			Players:     players,
 			RegTime:     req.RegTime,
 		})
 
 		channel.Broadcast(Response{
 			PayloadType: "SPAWN",
 			SessionId:   client.Sid,
-			Player:      Player,
+			Player:      player,
 			RegTime:     req.RegTime,
 		})
 	case MOVE:
-		var player = channel.players[req.Sid]
-		if player == nil {
-			return
-		}
+		if v, ok := channel.players.Load(req.Sid); ok {
+			player := v.(Player)
 
-		var x = player.Pos[0]
-		var y = player.Pos[1]
-		x += req.Dir[0]
-		y += req.Dir[1]
+			var x = player.Pos[0]
+			var y = player.Pos[1]
+			x += req.Dir[0]
+			y += req.Dir[1]
 
-		if x < 0 {
-			x = 0
-		} else if x > MAX_SIZE {
-			x = MAX_SIZE
-		}
+			if x < 0 {
+				x = 0
+			} else if x > MAX_SIZE {
+				x = MAX_SIZE
+			}
 
-		if y < 0 {
-			y = 0
-		} else if y > MAX_SIZE {
-			y = MAX_SIZE
-		}
+			if y < 0 {
+				y = 0
+			} else if y > MAX_SIZE {
+				y = MAX_SIZE
+			}
 
-		player.Pos[0] = x
-		player.Pos[1] = y
+			player.Pos[0] = x
+			player.Pos[1] = y
 
-		channel.Broadcast(Response{
-			PayloadType: "MOVE",
-			SessionId:   client.Sid,
-			Player:      *player,
-			RegTime:     req.RegTime,
-		})
-	case ATTACK:
-		var target = channel.players[req.TargetId]
-		if target == nil {
-			return
-		}
-
-		var x = channel.players[req.Sid].Pos[0] - target.Pos[0]
-		var y = channel.players[req.Sid].Pos[1] - target.Pos[1]
-		var dis = math.Sqrt(float64((x * x) + (y * y)))
-		if dis < 2 {
-			target.Hp[0] = target.Hp[0] - 1
-		}
-
-		channel.Broadcast(Response{
-			PayloadType: "ATTACK",
-			SessionId:   req.TargetId,
-			Player:      *target,
-			RegTime:     req.RegTime,
-		})
-
-		if target.Hp[0] < 1 {
-			delete(channel.players, req.TargetId)
+			channel.players.Store(client.Sid, player)
 			channel.Broadcast(Response{
-				PayloadType: "DEAD",
-				SessionId:   req.TargetId,
+				PayloadType: "MOVE",
+				SessionId:   client.Sid,
+				Player:      player,
 				RegTime:     req.RegTime,
 			})
+		}
+	case ATTACK:
+		p, ok1 := channel.players.Load(req.Sid)
+		t, ok2 := channel.players.Load(req.TargetId)
+
+		if ok1 && ok2 {
+			player := p.(Player)
+			target := t.(Player)
+
+			var x = player.Pos[0] - target.Pos[0]
+			var y = player.Pos[1] - target.Pos[1]
+			var dis = math.Sqrt(float64((x * x) + (y * y)))
+
+			if dis < 2 {
+				target.Hp[0] = target.Hp[0] - 1
+			}
+
+			channel.players.Store(req.TargetId, target)
+			channel.Broadcast(Response{
+				PayloadType: "ATTACK",
+				SessionId:   req.TargetId,
+				Player:      target,
+				RegTime:     req.RegTime,
+			})
+
+			if target.Hp[0] < 1 {
+				channel.players.Delete(req.Sid)
+				channel.Broadcast(Response{
+					PayloadType: "DEAD",
+					SessionId:   req.TargetId,
+					RegTime:     req.RegTime,
+				})
+			}
 		}
 	}
 }
 
 type Channel struct {
-	clients map[string]*Client
-	players map[string]*Player
+	conns   sync.Map
+	players sync.Map
 }
 
 type Client struct {
+	mu   *sync.Mutex
 	Sid  string
 	Conn *websocket.Conn
 }
@@ -201,11 +227,18 @@ type Request struct {
 }
 
 func (client *Client) Send(response Response) {
+	client.mu.Lock()
 	client.Conn.WriteJSON(response)
+	client.mu.Unlock()
 }
 
 func (channel *Channel) Broadcast(response Response) {
-	for _, client := range channel.clients {
-		client.Conn.WriteJSON(response)
-	}
+	channel.conns.Range(func(key, value interface{}) bool {
+		if v, ok := channel.conns.Load(key); ok {
+			client := v.(Client)
+			client.Send(response)
+		}
+
+		return true
+	})
 }
