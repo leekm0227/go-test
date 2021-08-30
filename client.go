@@ -29,7 +29,10 @@ func (client *Client) receive() {
 		case act := <-client.action:
 			switch act.actionType {
 			case ACT_ATTACK:
-				client.Player.attack(act.pos, act.power, act.regTime)
+				client.Player.attack(act.enemyPos, act.regTime)
+				if client.Player.Hp[0] < 1 {
+					client.respawn()
+				}
 			case ACT_MOVE:
 				client.Player.move(act.dir, act.regTime)
 			}
@@ -40,32 +43,22 @@ func (client *Client) receive() {
 }
 
 func (client *Client) send() {
-	defer func() {
-		// log.Printf("client leave")
-		channel.leave <- *client
-		channel.broadcast <- Response{
-			PayloadType: "DEAD",
-			SessionId:   client.Sid,
-			RegTime:     uint64(time.Now().Unix() * 1000),
-		}
-		client.Conn.Close()
-	}()
+	defer client.retire()
 
 	for {
 		var req Request
 		if err := client.Conn.ReadJSON(&req); err != nil {
-			// log.Printf("conn.ReadJSON: %+v", err)
 			return
 		}
 
 		switch req.PayloadType {
 		case INIT:
 			client.Player = newPlayer(client.Sid)
-			channel.PlayerManager.add(client.Sid, *client.Player)
+			channel.PlayerManager.add(client.Sid, client.Player)
 			client.outbound <- Response{
 				PayloadType: "INIT",
 				Id:          client.Sid,
-				Players:     channel.PlayerManager.list(),
+				Players:     channel.PlayerManager.players,
 				RegTime:     req.RegTime,
 			}
 
@@ -78,7 +71,28 @@ func (client *Client) send() {
 		case MOVE:
 			client.action <- newActionMove(req.Dir, req.RegTime)
 		case ATTACK:
-			channel.attack <- newActionAttack(req.TargetId, client.Player.Pos, POWER, req.RegTime)
+			x, y := client.Player.getPos()
+			channel.attack <- newActionAttack(req.TargetId, [2]int{x, y}, req.RegTime)
 		}
 	}
+}
+
+func (client *Client) respawn() {
+	client.Player = newPlayer(client.Sid)
+	channel.broadcast <- Response{
+		PayloadType: "SPAWN",
+		SessionId:   client.Sid,
+		Player:      *client.Player,
+		RegTime:     uint64(time.Now().Unix() * 1000),
+	}
+}
+
+func (client *Client) retire() {
+	channel.leave <- *client
+	channel.broadcast <- Response{
+		PayloadType: "DEAD",
+		SessionId:   client.Sid,
+		RegTime:     uint64(time.Now().Unix() * 1000),
+	}
+	client.Conn.Close()
 }

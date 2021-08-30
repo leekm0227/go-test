@@ -3,6 +3,7 @@ package main
 import (
 	"log"
 	"net/http"
+	"runtime"
 	"strings"
 
 	"github.com/google/uuid"
@@ -28,6 +29,7 @@ const (
 var channel Channel
 
 func main() {
+	runtime.GOMAXPROCS(runtime.NumCPU())
 	channel = newChannel()
 	go channel.run()
 
@@ -74,8 +76,8 @@ type Response struct {
 	Player      Player `json:"player"`
 
 	// init
-	Id      string            `json:"id"`
-	Players map[string]Player `json:"players"`
+	Id      string             `json:"id"`
+	Players map[string]*Player `json:"players"`
 }
 
 type Request struct {
@@ -94,21 +96,19 @@ type Action struct {
 	regTime    uint64
 
 	// attack
-	pos      [2]int
-	power    int
 	targetId string
+	enemyPos [2]int
 
 	// move
 	dir [2]int
 }
 
-func newActionAttack(targetId string, pos [2]int, power int, regTime uint64) Action {
+func newActionAttack(targetId string, pos [2]int, regTime uint64) Action {
 	return Action{
 		actionType: ACT_ATTACK,
 		regTime:    regTime,
-		pos:        pos,
-		power:      power,
 		targetId:   targetId,
+		enemyPos:   pos,
 	}
 }
 
