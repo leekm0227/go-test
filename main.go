@@ -11,14 +11,13 @@ import (
 )
 
 const (
-	CHAN_BUFFER_SIZE = 50
+	CHAN_BUFFER_SIZE = 10
 )
 
-var channel Channel
+var channel = newChannel()
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
-	channel = newChannel()
 	go channel.run()
 
 	http.HandleFunc("/channel", socketHandler)
@@ -28,7 +27,6 @@ func main() {
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal(err)
 	}
-
 }
 
 var upgrader = websocket.Upgrader{

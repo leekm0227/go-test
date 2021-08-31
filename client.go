@@ -37,7 +37,7 @@ func (client *Client) send() {
 			return
 		}
 
-		channel.broadcast <- &Response{
+		channel.broadcast <- Response{
 			Sid:     client.Sid,
 			Body:    req.body,
 			RegTime: req.RegTime,

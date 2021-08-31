@@ -9,7 +9,7 @@ from websocket import create_connection
 
 
 class ChannelTaskSet(locust.TaskSet):
-    wait_time = locust.between(1, 2)
+    wait_time = locust.between(5, 10)
 
     def __init__(self, parent):
         super().__init__(parent)
