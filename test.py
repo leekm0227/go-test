@@ -9,7 +9,7 @@ from websocket import create_connection
 
 
 class ChannelTaskSet(locust.TaskSet):
-    wait_time = locust.between(1, 2)
+    wait_time = locust.between(25, 30)
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -86,7 +86,7 @@ class ChannelTaskSet(locust.TaskSet):
                             "targetId": self.target,
                         }
                         body = json.dumps(data)
-                        self.ws.send(body)
+                        # self.ws.send(body)
                         locust.events.request_success.fire(
                             request_type='send',
                             name='success',
@@ -114,7 +114,7 @@ class ChannelTaskSet(locust.TaskSet):
                     "dir": direction,
                 }
                 body = json.dumps(data)
-                self.ws.send(body)
+                # self.ws.send(body)
                 locust.events.request_success.fire(
                     request_type='send',
                     name='success',
@@ -132,7 +132,7 @@ class ChannelTaskSet(locust.TaskSet):
         else:
             data = {"payloadType": 1, "regTime": round(time.time() * 1000)}
             body = json.dumps(data)
-            self.ws.send(body)
+            # self.ws.send(body)
 
 
 class ChatLocust(locust.HttpUser):

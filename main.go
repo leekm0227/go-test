@@ -4,9 +4,7 @@ import (
 	"log"
 	"net/http"
 	"runtime"
-	"strings"
 
-	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
 
@@ -30,17 +28,16 @@ var channel Channel
 
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
-	channel = newChannel()
-	go channel.run()
-
-	http.HandleFunc("/channel", socketHandler)
 
 	port := "22222"
+	channel = newChannel()
+	channel.run()
+	http.HandleFunc("/channel", socketHandler)
+
 	log.Printf("Listening on port %s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal(err)
 	}
-
 }
 
 var upgrader = websocket.Upgrader{
@@ -58,12 +55,7 @@ func socketHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	sid := strings.Split(uuid.NewString(), "-")[0]
-	client := newClient(sid, conn)
-	channel.join <- client
-	go client.send()
-	go client.receive()
-	// log.Printf("client start")
+	channel.handle(conn)
 }
 
 type PayloadType int
@@ -76,8 +68,8 @@ type Response struct {
 	Player      Player `json:"player"`
 
 	// init
-	Id      string             `json:"id"`
-	Players map[string]*Player `json:"players"`
+	Id      string            `json:"id"`
+	Players map[string]Player `json:"players"`
 }
 
 type Request struct {
@@ -97,25 +89,27 @@ type Action struct {
 
 	// attack
 	targetId string
-	enemyPos [2]int
+	enemyId  string
 
 	// move
+	sid string
 	dir [2]int
 }
 
-func newActionAttack(targetId string, pos [2]int, regTime uint64) Action {
+func newActionAttack(targetId string, enemyId string, regTime uint64) Action {
 	return Action{
 		actionType: ACT_ATTACK,
 		regTime:    regTime,
 		targetId:   targetId,
-		enemyPos:   pos,
+		enemyId:    enemyId,
 	}
 }
 
-func newActionMove(dir [2]int, regTime uint64) Action {
+func newActionMove(sid string, dir [2]int, regTime uint64) Action {
 	return Action{
 		actionType: ACT_MOVE,
 		regTime:    regTime,
+		sid:        sid,
 		dir:        dir,
 	}
 }
