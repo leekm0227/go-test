@@ -24,14 +24,10 @@ const (
 	ACT_ATTACK ActionType = 1
 )
 
-var channel Channel
-
 func main() {
 	runtime.GOMAXPROCS(runtime.NumCPU())
 
 	port := "22222"
-	channel = newChannel()
-	channel.run()
 	http.HandleFunc("/channel", socketHandler)
 
 	log.Printf("Listening on port %s", port)
@@ -49,13 +45,25 @@ var upgrader = websocket.Upgrader{
 }
 
 func socketHandler(w http.ResponseWriter, r *http.Request) {
+	var req Request
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("upgrader.Upgrade: %+v", err)
 		return
 	}
 
-	channel.handle(conn)
+	go func() {
+		for {
+			if err := conn.ReadJSON(&req); err != nil {
+				return
+			}
+
+			conn.WriteJSON(Response{
+				Id:      "test",
+				RegTime: req.RegTime,
+			})
+		}
+	}()
 }
 
 type PayloadType int
@@ -65,11 +73,9 @@ type Response struct {
 	PayloadType string `json:"payloadType"`
 	SessionId   string `json:"sessionId"`
 	RegTime     uint64 `json:"regTime"`
-	Player      Player `json:"player"`
 
 	// init
-	Id      string            `json:"id"`
-	Players map[string]Player `json:"players"`
+	Id string `json:"id"`
 }
 
 type Request struct {
@@ -78,38 +84,4 @@ type Request struct {
 	RegTime     uint64
 	TargetId    string `json:"targetId,omitempty"`
 	Dir         [2]int
-
-	// attack
-	Player Player `json:"player,omitempty"`
-}
-
-type Action struct {
-	actionType ActionType
-	regTime    uint64
-
-	// attack
-	targetId string
-	enemyId  string
-
-	// move
-	sid string
-	dir [2]int
-}
-
-func newActionAttack(targetId string, enemyId string, regTime uint64) Action {
-	return Action{
-		actionType: ACT_ATTACK,
-		regTime:    regTime,
-		targetId:   targetId,
-		enemyId:    enemyId,
-	}
-}
-
-func newActionMove(sid string, dir [2]int, regTime uint64) Action {
-	return Action{
-		actionType: ACT_MOVE,
-		regTime:    regTime,
-		sid:        sid,
-		dir:        dir,
-	}
 }
